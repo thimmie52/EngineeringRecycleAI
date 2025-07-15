@@ -1,74 +1,86 @@
-from fastapi import FastAPI, UploadFile, File
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import sys
 from google import genai
-from google.genai import types 
+from google.genai import types
 from google.genai.types import Part
 import os
 from dotenv import load_dotenv
 from prompt.prompt import instruction_str
 
+# Load environment variables
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
-
-#Initializing Google GenAI Agent
 client = genai.Client(api_key=api_key)
-# Get the absolute path to the directory relative to this script
-current_dir = os.path.dirname(os.path.abspath(__file__))
-target_dir = os.path.join(current_dir, "data")
 
-files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
-print(files)
-
-#Load PDF Files
-def load_pdf_parts():
-    pdf_parts = []
-    
-    for file_path in files:
-        with open(f"data/{file_path}", "rb") as f:
-            data = f.read()
-            part = Part.from_bytes(data=data, mime_type="application/pdf")
-            pdf_parts.append(part)
-    return pdf_parts
-
-pdf_parts = load_pdf_parts()
-
-#Load Fast API
+# Initialize FastAPI
 app = FastAPI()
 
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins =["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
-
+    allow_headers=["*"]
 )
 
-#Creating the aibot
-@app.post("/analyse-image/")
+#  Image-only endpoint
+@app.post(
+    "/analyse-image/",
+    summary="Analyse an uploaded image",
+    description="Upload a JPEG image of an item. The AI will analyze it and suggest the best way to recycle it."
+)
 async def analyse_image(file: UploadFile = File(...)):
+    """
+    Analyse an image for recycling guidance.
+
+    - **file**: JPEG image file of the item.
+    - Returns a textual suggestion based on the image.
+    """
     image_bytes = await file.read()
 
+    if not image_bytes:
+        return JSONResponse({"error": "Empty image file"}, status_code=400)
+
+    contents = [
+        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+        types.Part.from_text(text="Analyse the image and suggest the best way to recycle.")
+    ]
+
     response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    config=types.GenerateContentConfig(
-        system_instruction=instruction_str),
-    contents=[
-    types.Part.from_bytes(
-    data=image_bytes,
-    mime_type='image/jpeg',
-    ),
-    'Analyze this image and provide relevant insight.'])
+        model="gemini-2.5-flash",
+        config=types.GenerateContentConfig(system_instruction=instruction_str),
+        contents=contents
+    )
 
     return {"response": response.text}
 
 
+@app.post(
+    "/analyse-text/",
+    summary="Analyse a text description",
+    description="Submit a text description of an item. The AI will suggest how best to recycle or repurpose it."
+)
+async def analyse_text(prompt: str = Form(...)):
+    """
+    Analyse a text prompt for recycling advice.
 
+    - **prompt**: Text description of the item.
+    - Returns recycling suggestions.
+    """
+    if not prompt.strip():
+        return JSONResponse({"error": "Prompt cannot be empty"}, status_code=400)
 
+    contents = [
+        types.Part.from_text(text=prompt.strip())
+    ]
 
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        config=types.GenerateContentConfig(system_instruction=instruction_str),
+        contents=contents
+    )
 
-
-
+    return {"response": response.text}
 
