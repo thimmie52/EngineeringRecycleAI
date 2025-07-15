@@ -25,6 +25,36 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+def load_pdf_parts():
+    pdf_parts = []
+    data_dir = "data"
+
+    all_items = os.listdir(data_dir)
+    pdf_files = [f for f in all_items if f.lower().endswith(".pdf")]
+
+    for file_name in pdf_files:
+        file_path = os.path.join(data_dir, file_name)
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+                # Skip empty files
+                if len(data) == 0:
+                    print(f"⚠️ Skipped empty PDF: {file_name}")
+                    continue
+
+                part = Part.from_bytes(data=data, mime_type="application/pdf")
+                pdf_parts.append(part)
+
+        except Exception as e:
+            print(f"Failed to load {file_name}: {e}")
+
+    return pdf_parts
+
+
+pdf_parts = load_pdf_parts()
+pdf_parts = pdf_parts[:8]
+
 #  Image-only endpoint
 @app.post(
     "/analyse-image/",
@@ -47,11 +77,14 @@ async def analyse_image(file: UploadFile = File(...)):
         types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
         types.Part.from_text(text="Analyse the image and suggest the best way to recycle.")
     ]
+  
+
+
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         config=types.GenerateContentConfig(system_instruction=instruction_str),
-        contents=contents
+        contents=[*pdf_parts,*contents]
     )
 
     return {"response": response.text}
@@ -79,7 +112,7 @@ async def analyse_text(prompt: str = Form(...)):
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         config=types.GenerateContentConfig(system_instruction=instruction_str),
-        contents=contents
+        contents=[*pdf_parts,*contents]
     )
 
     return {"response": response.text}
